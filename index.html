@@ -364,7 +364,21 @@
       return { id: pid, name: p ? p.name : "?", points: stats[pid].points, wins: stats[pid].wins };
     });
     rows.sort(function (a, b) { return b.points - a.points || b.wins - a.wins || a.name.localeCompare(b.name); });
+    rows.forEach(function (row, i) {
+      row.rank = (i > 0 && row.points === rows[i - 1].points) ? rows[i - 1].rank : i + 1;
+    });
     return rows;
+  }
+
+  // standard competition ranking (1,2,2,4): tiedAfter[i] true means order[i] shares the previous rank
+  function computeRanksWithTies(order, tiedAfter) {
+    var result = [];
+    var rank = 1;
+    order.forEach(function (pid, i) {
+      if (i > 0 && !tiedAfter[i]) rank = i + 1;
+      result.push({ playerId: pid, rank: rank });
+    });
+    return result;
   }
 
   var App = window.App = {};
@@ -516,11 +530,11 @@
     }
     var session = getSession(sessionId);
     var initialSelected = session.playerIds.slice(0, Math.min(session.playerIds.length, 8));
-    modal = { type: "round-flow", sessionId: sessionId, step: 1, gameId: null, selected: initialSelected, order: [] };
+    modal = { type: "round-flow", sessionId: sessionId, step: 1, gameId: null, selected: initialSelected, order: [], tiedAfter: [] };
     renderAll();
   };
   App.roundBack = function () {
-    if (modal.step === 1) { modal = null; } else { modal.step -= 1; if (modal.step === 2) modal.order = []; }
+    if (modal.step === 1) { modal = null; } else { modal.step -= 1; if (modal.step === 2) { modal.order = []; modal.tiedAfter = []; } }
     renderAll();
   };
   App.roundPickGame = function (gameId) {
@@ -539,21 +553,28 @@
   };
   App.roundGoToRanking = function () {
     if (modal.selected.length < 2) return;
-    modal.step = 3; modal.order = [];
+    modal.step = 3; modal.order = []; modal.tiedAfter = [];
     renderAll();
   };
   App.roundTap = function (pid) {
     var idx = modal.order.indexOf(pid);
-    if (idx !== -1) modal.order.splice(idx, 1); else modal.order.push(pid);
+    if (idx !== -1) { modal.order.splice(idx, 1); modal.tiedAfter.splice(idx, 1); }
+    else { modal.order.push(pid); modal.tiedAfter.push(false); }
     renderAll();
   };
-  App.roundResetRanking = function () { modal.order = []; renderAll(); };
+  App.roundToggleTie = function (idx) {
+    if (idx <= 0) return;
+    modal.tiedAfter[idx] = !modal.tiedAfter[idx];
+    renderAll();
+  };
+  App.roundResetRanking = function () { modal.order = []; modal.tiedAfter = []; renderAll(); };
   App.roundConfirm = function () {
     var g = getGame(modal.gameId);
     var session = getSession(modal.sessionId);
-    var rankings = modal.order.map(function (pid, i) {
-      var p = getPlayer(pid);
-      return { playerId: pid, playerName: p ? p.name : "?", rank: i + 1, points: g.points[i] != null ? g.points[i] : 0 };
+    var ranks = computeRanksWithTies(modal.order, modal.tiedAfter);
+    var rankings = ranks.map(function (r) {
+      var p = getPlayer(r.playerId);
+      return { playerId: r.playerId, playerName: p ? p.name : "?", rank: r.rank, points: g.points[r.rank - 1] != null ? g.points[r.rank - 1] : 0 };
     });
     session.rounds.push({ id: uid(), gameId: g.id, gameName: g.name, rankings: rankings, ts: Date.now() });
     save(); modal = null; renderAll();
@@ -645,7 +666,7 @@
     var stats = sessionStats(s);
     var lb = stats.map(function (row, i) {
       return '<div class="leaderboard-row">' +
-        '<div class="lb-rank' + (i === 0 && row.points > 0 ? " first" : "") + '">' + (i + 1) + '</div>' +
+        '<div class="lb-rank' + (row.rank === 1 && row.points > 0 ? " first" : "") + '">' + row.rank + '</div>' +
         '<div class="lb-name-wrap"><div class="lb-name">' + esc(row.name) + '</div><div class="lb-wins">' + row.wins + ' victoire' + (row.wins !== 1 ? "s" : "") + '</div></div>' +
         '<div class="lb-points">' + row.points + '</div></div>';
     }).join("");
@@ -756,15 +777,24 @@
         '<div class="field"><label>Participants (' + modal.selected.length + ' / ' + g.maxPlayers + ' max)</label><div class="chip-grid">' + chips + '</div></div>' +
         '<button class="btn btn-primary" ' + (modal.selected.length < 2 ? "disabled" : "") + ' onclick="App.roundGoToRanking()">Continuer</button>';
     } else if (modal.step === 3) {
-      var g3 = getGame(modal.gameId);
-      var rows = modal.selected.map(function (pid) {
-        var p = getPlayer(pid); var idx = modal.order.indexOf(pid);
-        var badge = idx === -1 ? '<div class="rank-badge">–</div>' : '<div class="rank-badge set">' + (idx + 1) + '</div>';
-        return '<div class="rank-tap-row' + (idx !== -1 ? " done" : "") + '" style="cursor:pointer" onclick="App.roundTap(\'' + pid + '\')">' + badge + '<div class="rname">' + esc(p.name) + '</div></div>';
+      var ranksNow = computeRanksWithTies(modal.order, modal.tiedAfter);
+      var rankedRows = modal.order.map(function (pid, idx) {
+        var p = getPlayer(pid);
+        var rank = ranksNow[idx].rank;
+        var tied = !!modal.tiedAfter[idx];
+        var badge = '<div class="rank-badge set">' + rank + '</div>';
+        var tieBtn = idx > 0 ? '<button class="chip' + (tied ? " selected" : "") + '" style="font-size:0.72rem;padding:6px 10px;flex-shrink:0" onclick="event.stopPropagation();App.roundToggleTie(' + idx + ')">' + (tied ? "Égalité ✓" : "À égalité") + '</button>' : "";
+        return '<div class="rank-tap-row done">' +
+          '<div style="display:flex;align-items:center;gap:12px;flex:1;cursor:pointer" onclick="App.roundTap(\'' + pid + '\')">' + badge + '<div class="rname">' + esc(p.name) + '</div></div>' +
+          tieBtn + '</div>';
+      }).join("");
+      var unrankedRows = modal.selected.filter(function (pid) { return modal.order.indexOf(pid) === -1; }).map(function (pid) {
+        var p = getPlayer(pid);
+        return '<div class="rank-tap-row" style="cursor:pointer" onclick="App.roundTap(\'' + pid + '\')"><div class="rank-badge">–</div><div class="rname">' + esc(p.name) + '</div></div>';
       }).join("");
       var allRanked = modal.order.length === modal.selected.length;
-      body = '<div class="sheet-title">Ordre d\'arrivée</div><p style="color:var(--muted);font-size:0.86rem;margin-bottom:12px">Touchez les joueurs dans l\'ordre, du 1er au dernier.</p>' +
-        '<div class="rank-row-list">' + rows + '</div>' +
+      body = '<div class="sheet-title">Ordre d\'arrivée</div><p style="color:var(--muted);font-size:0.86rem;margin-bottom:12px">Touchez les joueurs dans l\'ordre, du 1er au dernier. En cas d\'égalité, utilisez "À égalité" sur le joueur concerné.</p>' +
+        '<div class="rank-row-list">' + rankedRows + unrankedRows + '</div>' +
         '<div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-ghost" onclick="App.roundResetRanking()">Réinitialiser</button></div>' +
         '<button class="btn btn-primary" ' + (allRanked ? "" : "disabled") + ' onclick="App.roundConfirm()" style="margin-top:8px">Valider la manche</button>';
     }
