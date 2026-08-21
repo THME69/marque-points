@@ -78,15 +78,20 @@
     font-family: var(--font-body);
     -webkit-font-smoothing: antialiased;
   }
-  button, input { font-family: inherit; color: inherit; }
+  button, input, textarea { font-family: inherit; color: inherit; }
   button { -webkit-appearance: none; appearance: none; border: none; background: none; cursor: pointer; }
-  input[type="text"], input[type="date"], input[type="number"] {
+  input[type="text"], input[type="date"], input[type="number"], textarea {
     -webkit-appearance: none; appearance: none;
     background: var(--surface-2); color: var(--ink);
     border: 1px solid var(--line); border-radius: var(--radius-btn);
     padding: 11px 12px; font-size: 0.98rem; width: 100%;
   }
-  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  textarea { min-height: 220px; resize: vertical; line-height: 1.5; }
+  input:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .form-tabs { display: flex; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-btn); padding: 4px; margin-bottom: 16px; }
+  .form-tabs button { flex: 1; text-align: center; padding: 9px 0; border-radius: 9px; font-weight: 600; font-size: 0.88rem; color: var(--muted); }
+  .form-tabs button.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+  .rules-text { white-space: pre-wrap; line-height: 1.55; font-size: 0.94rem; color: var(--ink-soft); }
   h1, h2, h3 { margin: 0; font-family: var(--font-display); text-wrap: balance; }
   p { margin: 0; }
   ::selection { background: var(--gold-soft); }
@@ -313,6 +318,22 @@
     return arr;
   }
 
+  var CATANE_RULES = "RÈGLES MAISON — CATAN (variante avancée)\n\n" +
+    "1. SEUIL DE DÉFAUSSE\n" +
+    "Un joueur ayant 7 cartes ou plus en main lors d'un 7 doit défausser (seuil abaissé par rapport à la règle officielle qui est à 8+).\n\n" +
+    "2. BLOCUS DE PORT\n" +
+    "Tant que le voleur occupe un hexagone adjacent à un port, ce port est inutilisable par tous les joueurs, y compris son propriétaire.\n\n" +
+    "3. VOLEUR TOUJOURS MOBILE\n" +
+    "À chaque 7 obtenu, le voleur doit être déplacé sur un hexagone différent de celui qu'il occupe actuellement. Il ne peut jamais être replacé sur son hexagone courant.\n\n" +
+    "4. MISE EN PLACE EN DRAFT\n" +
+    "Au lieu de l'ordre de tour classique, chaque joueur choisit et place ses deux colonies de départ (+ routes associées) simultanément et en secret. En cas de conflit sur un même carrefour, le conflit est tranché par [MÉCANISME À CONFIRMER : mini-enchère en ressources ou lancer de dé]. La deuxième colonie distribue ses ressources normalement en début de partie.\n\n" +
+    "5. DÉFAUSSE DIRIGÉE À LA BANQUE (sur un 7)\n" +
+    "Tout joueur à 7 cartes ou plus doit défausser la moitié de sa main, arrondie à l'inférieur.\n" +
+    "  a. Un seul joueur (autre que le lanceur) défausse → 100% de sa défausse va au lanceur, rien à la banque.\n" +
+    "  b. Deux joueurs (autres que le lanceur) défaussent simultanément → le lanceur reçoit au total la moitié arrondie à l'inférieur de la main du plus gros des deux défausseurs ; ce total est réparti entre les deux défausseurs au prorata de leur propre défausse, l'arrondi favorisant le lanceur ; le reste de la défausse de chacun va à la banque.\n" +
+    "  c. Trois défausseurs ou plus → règle non définie, à trancher au cas par cas.\n" +
+    "  d. Si le lanceur a lui-même 7 cartes ou plus, sa défausse part entièrement à la banque (jamais à lui-même).";
+
   var ICONS = {
     sessions: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="3.5" width="16" height="17" rx="3.2"/><line x1="8" y1="8.5" x2="16" y2="8.5"/><line x1="8" y1="12.5" x2="13.5" y2="12.5"/><line x1="8" y1="16.2" x2="11.5" y2="16.2"/></svg>',
     games: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/><circle cx="8.3" cy="8.3" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.7" cy="8.3" r="1.15" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none"/><circle cx="8.3" cy="15.7" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.7" cy="15.7" r="1.15" fill="currentColor" stroke="none"/></svg>',
@@ -336,8 +357,8 @@
     return {
       players: [],
       games: [
-        { id: uid(), name: "Uno", maxPlayers: 6, points: [1, 0, 0, 0, 0, 0] },
-        { id: uid(), name: "Catane", maxPlayers: 4, points: [3, 2, 1, 0] }
+        { id: uid(), name: "Uno", maxPlayers: 6, points: [1, 0, 0, 0, 0, 0], rules: "" },
+        { id: uid(), name: "Catane", maxPlayers: 4, points: [3, 2, 1, 0], rules: CATANE_RULES }
       ],
       sessions: []
     };
@@ -425,10 +446,46 @@
     save(); renderAll();
   };
 
+  // ---------- backup ----------
+  App.exportData = function () {
+    var blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    var d = new Date();
+    var stamp = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    a.href = url;
+    a.download = "marque-points-sauvegarde-" + stamp + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+  };
+  App.importDataFile = function (input) {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var parsed;
+      try { parsed = JSON.parse(e.target.result); } catch (err) { parsed = null; }
+      var valid = parsed && Array.isArray(parsed.players) && Array.isArray(parsed.games) && Array.isArray(parsed.sessions);
+      if (!valid) {
+        modal = { type: "info", title: "Fichier invalide", message: "Ce fichier ne semble pas être une sauvegarde Marque-Points valide." };
+        renderAll(); return;
+      }
+      confirmAndAsk("Importer cette sauvegarde ?", "Toutes les données actuelles sur cet appareil (joueurs, jeux, sessions) seront remplacées par celles du fichier.", "Importer", function () {
+        state = parsed;
+        save();
+        view = { tab: "players", sessionId: null };
+      });
+    };
+    reader.readAsText(file);
+    input.value = "";
+  };
+
   // ---------- games ----------
   App.openGameForm = function (gameId) {
     var g = gameId ? getGame(gameId) : null;
-    modal = { type: "game-form", gameId: gameId || null, name: g ? g.name : "", maxPlayers: g ? g.maxPlayers : 4, points: g ? g.points.slice() : defaultPoints(4) };
+    modal = { type: "game-form", gameId: gameId || null, formTab: "points", name: g ? g.name : "", maxPlayers: g ? g.maxPlayers : 4, points: g ? g.points.slice() : defaultPoints(4), rules: g ? (g.rules || "") : "" };
     renderAll();
   };
   function syncGameFormFromDom() {
@@ -441,7 +498,14 @@
       if (el && el.value !== "") pts[i] = parseInt(el.value, 10) || 0;
     }
     modal.points = pts;
+    var rulesEl = document.getElementById("gf-rules");
+    if (rulesEl) modal.rules = rulesEl.value;
   }
+  App.setGameFormTab = function (tab) {
+    syncGameFormFromDom();
+    modal.formTab = tab;
+    renderAll();
+  };
   App.gameMaxPlayersDelta = function (delta) {
     syncGameFormFromDom();
     var n = Math.max(2, Math.min(8, modal.maxPlayers + delta));
@@ -454,11 +518,12 @@
     syncGameFormFromDom();
     var name = (modal.name || "").trim();
     if (!name) { flashFieldError("gf-name"); return; }
+    var rules = (modal.rules || "").trim();
     if (modal.gameId) {
       var g = getGame(modal.gameId);
-      g.name = name; g.maxPlayers = modal.maxPlayers; g.points = modal.points.slice();
+      g.name = name; g.maxPlayers = modal.maxPlayers; g.points = modal.points.slice(); g.rules = rules;
     } else {
-      state.games.push({ id: uid(), name: name, maxPlayers: modal.maxPlayers, points: modal.points.slice() });
+      state.games.push({ id: uid(), name: name, maxPlayers: modal.maxPlayers, points: modal.points.slice(), rules: rules });
     }
     save(); modal = null; renderAll();
   };
@@ -693,17 +758,31 @@
     }
     return state.games.map(function (g) {
       var scheme = g.points.map(function (p, i) { return (i + 1) + (i === 0 ? "er" : "e") + " " + p; }).join(" · ");
+      var rulesPill = g.rules ? '<div class="pill" style="background:var(--accent-soft);color:var(--accent)">Règles</div>' : "";
       return '<div class="card tap" onclick="App.openGameForm(\'' + g.id + '\')">' +
-        '<div class="game-card-top"><div class="game-name">' + esc(g.name) + '</div><div class="pill">' + g.maxPlayers + ' joueurs max</div></div>' +
+        '<div class="game-card-top"><div class="game-name">' + esc(g.name) + '</div><div style="display:flex;gap:6px;flex-shrink:0">' + rulesPill + '<div class="pill">' + g.maxPlayers + ' max</div></div></div>' +
         '<div class="game-scheme">' + scheme + '</div></div>';
     }).join("");
+  }
+
+  function backupSectionHTML() {
+    return '<div class="section-label" style="margin-top:26px">Sauvegarde</div>' +
+      '<div class="card">' +
+      '<p style="color:var(--ink-soft);font-size:0.86rem;margin-bottom:14px;line-height:1.4">Les données ne sont stockées que sur cet appareil. Exportez un fichier pour les conserver ou les transférer vers un autre téléphone.</p>' +
+      '<div style="display:flex;gap:10px">' +
+      '<button class="btn btn-secondary" style="flex:1" onclick="App.exportData()">Exporter</button>' +
+      '<button class="btn btn-secondary" style="flex:1" onclick="document.getElementById(\'import-file-input\').click()">Importer</button>' +
+      '</div>' +
+      '<input type="file" id="import-file-input" accept="application/json,.json" style="display:none" onchange="App.importDataFile(this)">' +
+      '</div>';
   }
 
   function playersListHTML() {
     var addForm = '<div class="add-inline"><input type="text" id="new-player-input" placeholder="Nom du joueur" onkeydown="if(event.key===\'Enter\')App.addPlayer()"><button onclick="App.addPlayer()">Ajouter</button></div>';
     if (!state.players.length) {
       return addForm + '<div class="empty-state" style="padding-top:24px">' + ICONS.players +
-        '<h3>Aucun joueur</h3><p>Ajoutez les habitués de vos soirées jeux — vous pourrez les choisir rapidement à chaque session.</p></div>';
+        '<h3>Aucun joueur</h3><p>Ajoutez les habitués de vos soirées jeux — vous pourrez les choisir rapidement à chaque session.</p></div>' +
+        backupSectionHTML();
     }
     var rows = state.players.map(function (p) {
       return '<div class="card" style="padding:6px 10px"><div class="player-row">' +
@@ -712,7 +791,7 @@
         '<button class="icon-btn danger" onclick="App.deletePlayer(\'' + p.id + '\')">' + ICONS.trash + '</button>' +
         '</div></div>';
     }).join("");
-    return addForm + rows;
+    return addForm + rows + backupSectionHTML();
   }
 
   // ---------- modal rendering ----------
@@ -743,18 +822,31 @@
   }
 
   function gameFormModalHTML() {
-    var pointsRows = "";
-    for (var i = 0; i < modal.maxPlayers; i++) {
-      var label = (i + 1) + (i === 0 ? "er" : "e");
-      pointsRows += '<div class="rank-input-row"><div class="rlabel">' + label + '</div><input type="number" id="gf-pt-' + i + '" value="' + (modal.points[i] != null ? modal.points[i] : 0) + '"></div>';
+    var tabs = '<div class="form-tabs">' +
+      '<button class="' + (modal.formTab === "points" ? "active" : "") + '" onclick="App.setGameFormTab(\'points\')">Barème de points</button>' +
+      '<button class="' + (modal.formTab === "rules" ? "active" : "") + '" onclick="App.setGameFormTab(\'rules\')">Règles</button>' +
+      '</div>';
+
+    var panel;
+    if (modal.formTab === "rules") {
+      panel = '<div class="field"><label>Règles maison</label>' +
+        '<textarea id="gf-rules" placeholder="Variantes, rappels, règles maison pour ce jeu… (optionnel)">' + esc(modal.rules) + '</textarea></div>';
+    } else {
+      var pointsRows = "";
+      for (var i = 0; i < modal.maxPlayers; i++) {
+        var label = (i + 1) + (i === 0 ? "er" : "e");
+        pointsRows += '<div class="rank-input-row"><div class="rlabel">' + label + '</div><input type="number" id="gf-pt-' + i + '" value="' + (modal.points[i] != null ? modal.points[i] : 0) + '"></div>';
+      }
+      panel = '<div class="field"><label>Nombre de joueurs max</label><div class="stepper">' +
+        '<button ' + (modal.maxPlayers <= 2 ? "disabled" : "") + ' onclick="App.gameMaxPlayersDelta(-1)">−</button><div class="val">' + modal.maxPlayers + '</div>' +
+        '<button ' + (modal.maxPlayers >= 8 ? "disabled" : "") + ' onclick="App.gameMaxPlayersDelta(1)">+</button></div></div>' +
+        '<div class="field"><label>Points par place</label><div class="rank-row-list">' + pointsRows + '</div></div>';
     }
+
     return '<div class="sheet-title">' + (modal.gameId ? "Modifier le jeu" : "Nouveau jeu") + '</div>' +
       '<div class="field"><label>Nom du jeu</label><input type="text" id="gf-name" placeholder="Ex. Uno, Catane…" value="' + esc(modal.name) + '"></div>' +
-      '<div class="field"><label>Nombre de joueurs max</label><div class="stepper">' +
-      '<button ' + (modal.maxPlayers <= 2 ? "disabled" : "") + ' onclick="App.gameMaxPlayersDelta(-1)">−</button><div class="val">' + modal.maxPlayers + '</div>' +
-      '<button ' + (modal.maxPlayers >= 8 ? "disabled" : "") + ' onclick="App.gameMaxPlayersDelta(1)">+</button></div></div>' +
-      '<div class="field"><label>Points par place</label><div class="rank-row-list">' + pointsRows + '</div></div>' +
-      '<button class="btn btn-primary" onclick="App.saveGameForm()" style="margin-bottom:8px">Enregistrer</button>' +
+      tabs + panel +
+      '<button class="btn btn-primary" onclick="App.saveGameForm()" style="margin-bottom:8px;margin-top:4px">Enregistrer</button>' +
       (modal.gameId ? '<button class="btn btn-danger" onclick="App.deleteGame(\'' + modal.gameId + '\')">Supprimer ce jeu</button>' : "");
   }
 
